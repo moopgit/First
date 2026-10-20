@@ -123,7 +123,7 @@ def cmd_log(args, cfg: Config) -> int:
     ledger = Ledger(cfg.state_dir)
     events = ledger.events(args.run)
     if args.task:
-        events = [e for e in events if e["task"] == args.task]
+        events = [e for e in events if isinstance(e, dict) and e.get("task") == args.task]
     if args.json:
         print("\n".join(json.dumps(e) for e in events))
     else:

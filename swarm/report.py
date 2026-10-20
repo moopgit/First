@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .state import RunView
+from .state import RunView, check_event
 
 ICON = {"pending": "·", "running": "▶", "review": "◎", "waiting": "⏸", "done": "✓", "escalated": "!", "parked": "–"}
 
@@ -83,7 +83,17 @@ def _detail(e: dict) -> str:
 
 
 def log(events: list[dict]) -> str:
-    return "\n".join(
-        f"{e['seq']:>5} {e['ts'][11:19]} {e['run']:<4} {(e['task'] or ''):<5} {e['actor']:<12} {e['type']:<18} {_detail(e)}"
-        for e in events
-    )
+    lines = []
+    for raw in events:
+        e, issues = check_event(raw)
+        if e is None:
+            lines.append(f"{'?':>5} unreadable event: {'; '.join(issues)}")
+            continue
+        try:
+            detail = _detail(e)
+        except (KeyError, TypeError, ValueError):
+            detail = _clip(", ".join(f"{k}={v}" for k, v in e["data"].items()), 120)
+        if issues:
+            detail += f"  [malformed: {'; '.join(issues)}]"
+        lines.append(f"{e['seq']:>5} {e['ts'][11:19]} {e['run']:<4} {(e['task'] or ''):<5} {e['actor']:<12} {e['type']:<18} {detail}")
+    return "\n".join(lines)

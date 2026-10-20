@@ -99,7 +99,10 @@ class Orchestrator:
     def adopt_config(self, run_id: str) -> None:
         run = self.view(run_id)
         if run.config_hash != self.cfg.hash:
-            (self.run_dir(run_id) / "config.yaml").write_text(self.cfg.source_text)
+            current = self.run_dir(run_id) / "config.yaml"
+            if current.exists():  # keep the rules earlier work ran under, named by their hash, for the audit
+                shutil.copyfile(current, current.with_name(f"config.{run.config_hash[:16]}.yaml"))
+            current.write_text(self.cfg.source_text)
             self.ledger.append("config_adopted", run=run_id, actor=self.cfg.governor, old=run.config_hash, new=self.cfg.hash)
 
     def find_decision(self, decision_id: str) -> tuple[RunView, DecisionView]:

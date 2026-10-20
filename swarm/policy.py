@@ -83,6 +83,14 @@ def is_structural_command(policy: Policy, argv: list[str]) -> bool:
     return _has_prefix(argv, policy.structural_commands)
 
 
+def expected_gates(cfg: Config, seat: Seat, content_class: str) -> list[str]:
+    """The mechanical gates every submission of this seat's work must pass, as configured."""
+    names = ["artifacts", "secret_scan"]
+    if cfg.policy.pii_scan and content_class not in cfg.policy.redline_classes:
+        names.append("pii_scan")
+    return names + [f"check: {c}" for c in seat.checks]
+
+
 # --- approval wording ---------------------------------------------------------
 # Only an unambiguous imperative approves. "should be in I think" is a question
 # or a thought, not a yes: the harness refuses it and asks again.

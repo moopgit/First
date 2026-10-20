@@ -6,10 +6,64 @@ status can never disagree with the record it summarizes.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 
 # A task is always in exactly one status: pending, running, waiting, review, done, escalated or parked.
 TERMINAL = ("done", "parked")
+
+ENVELOPE = {"seq": int, "ts": str, "run": str, "task": (str, type(None)), "type": str, "actor": str, "data": dict}
+# Data fields each event type needs, with the value used in their place when one is missing or mistyped.
+FIELDS: dict[str, dict[str, object]] = {
+    "run_started": {"goal": "", "requested_by": "", "config_hash": ""},
+    "task_created": {"seat": "", "mode": "", "goal": "", "acceptance": [], "deps": [], "tier": "",
+                     "content_class": "", "requested_by": ""},
+    "turn": {"cost": 0.0},
+    "submitted": {"summary": "", "artifacts": []},
+    "gate": {"gate": "", "passed": False, "findings": []},
+    "review": {"reviewer": "", "verdict": ""},
+    "fix_cycle": {"feedback": ""},
+    "waiting": {"triggers": []},
+    "escalated": {"reason": ""},
+    "retry": {"note": ""},
+    "decision_requested": {"decision": "", "kind": "", "summary": ""},
+    "decided": {"decision": "", "granted": False, "text": ""},
+    "action_executed": {"decision": "", "action_hash": ""},
+    "config_adopted": {"new": ""},
+    "run_paused": {"reason": ""},
+    "run_finished": {"status": ""},
+}
+
+
+def _fits(value: object, default: object) -> bool:
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, float):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, type(default))
+
+
+def check_event(raw: object) -> tuple[dict | None, list[str]]:
+    """Return the event with every required field present and well-typed, plus what was wrong with it.
+
+    Missing or mistyped data fields are replaced by defaults and reported. None means the event
+    can't be read at all (not an object, or its envelope is incomplete).
+    """
+    if not isinstance(raw, dict):
+        return None, ["not an event object"]
+    bad = [k for k, kind in ENVELOPE.items() if k not in raw or not isinstance(raw[k], kind)]
+    if bad:
+        return None, [f"envelope field {', '.join(bad)} missing or mistyped"]
+    data, issues = dict(raw["data"]), []
+    for key, default in FIELDS.get(raw["type"], {}).items():
+        if key not in data:
+            issues.append(f"{raw['type']} has no {key}")
+        elif not _fits(data[key], default):
+            issues.append(f"{raw['type']} field {key} has the wrong type")
+        else:
+            continue
+        data[key] = copy.copy(default)
+    return {**raw, "data": data}, issues
 
 
 @dataclass
@@ -113,12 +167,19 @@ class RunView:
         return False
 
 
-def project(events: list[dict]) -> dict[str, RunView]:
+def project(events: list[dict], problems: list[str] | None = None) -> dict[str, RunView]:
+    """Rebuild every run from its events. Malformed events are tolerated and, if `problems` is given, reported."""
     runs: dict[str, RunView] = {}
-    for e in events:
+    for raw in events:
+        e, issues = check_event(raw)
+        if problems is not None:
+            seq = raw.get("seq", "?") if isinstance(raw, dict) else "?"
+            problems.extend(f"seq {seq}: {issue}" for issue in issues)
+        if e is None:
+            continue
         typ, d, rid = e["type"], e["data"], e["run"]
         if typ == "run_started":
-            runs[rid] = RunView(rid, d["goal"], d["requested_by"], d["config_hash"], d.get("provider", ""), e["ts"])
+            runs[rid] = RunView(rid, d["goal"], d["requested_by"], d["config_hash"], str(d.get("provider", "")), e["ts"])
             continue
         run = runs.get(rid)
         if run is None:
@@ -131,7 +192,8 @@ def project(events: list[dict]) -> dict[str, RunView]:
             run.tasks[e["task"]] = TaskView(
                 id=e["task"], run=rid, seat=d["seat"], mode=d["mode"], goal=d["goal"], acceptance=d["acceptance"],
                 deps=d["deps"], tier=d["tier"], content_class=d["content_class"], requested_by=d["requested_by"],
-                created_by=e["actor"], parent=d.get("parent"), depth=d.get("depth", 0), key=d.get("key", ""), last_seq=e["seq"],
+                created_by=e["actor"], parent=d.get("parent"), depth=d["depth"] if isinstance(d.get("depth"), int) else 0,
+                key=str(d.get("key", "")), last_seq=e["seq"],
             )
         elif typ == "task_started" and t:
             t.status, t.started, t.triggers = "running", True, []

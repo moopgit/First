@@ -109,7 +109,7 @@ class Ledger:
                     event = json.loads(raw)
                 except json.JSONDecodeError as e:
                     raise LedgerError(f"ledger line {n} is not valid JSON - run `swarm audit`") from e
-                if run is None or event["run"] == run:
+                if run is None or (isinstance(event, dict) and event.get("run") == run):
                     out.append(event)
         return out
 
@@ -129,13 +129,19 @@ class Ledger:
             except json.JSONDecodeError:
                 problems.append(f"line {n}: not valid JSON")
                 continue
-            if event.get("seq") != expected_seq:
-                problems.append(f"line {n}: seq {event.get('seq')} (expected {expected_seq})")
+            if not isinstance(event, dict):
+                problems.append(f"line {n}: not an event object")
+                prev, expected_seq = "", expected_seq + 1
+                continue
+            seq = event.get("seq")
+            if seq != expected_seq:
+                problems.append(f"line {n}: seq {seq} (expected {expected_seq})")
             if event.get("prev") != prev:
                 problems.append(f"line {n}: chain broken (prev hash mismatch)")
             if event.get("hash") != _digest(event):
                 problems.append(f"line {n}: content does not match its hash (edited?)")
-            prev, expected_seq = event.get("hash", ""), (event.get("seq") or expected_seq) + 1
+            prev = event.get("hash", "")
+            expected_seq = (seq if isinstance(seq, int) and not isinstance(seq, bool) else expected_seq) + 1
         return problems
 
     def _tail(self) -> tuple[int, str]:
