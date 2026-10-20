@@ -2,7 +2,7 @@
 
 A harness for running a team of Claude agents ("seats") under rules that are enforced in code.
 
-It's a rebuild of the operating model in [`moopgit/fleet`](https://github.com/moopgit/fleet). The fleet's rules are good, but they live in about 2,200 markdown files and are mostly enforced by agents remembering to follow them. The fleet's own 2026-10-11 hard-rule audit ([`fleet/hard-rule-audit.md`](https://github.com/moopgit/fleet/blob/main/fleet/hard-rule-audit.md), line 31) counts 4 of 13 structural rules enforced, two of them built that day. Here, the rules that govern agent work (lanes, approvals, review, escalation, budgets) are code paths an agent can't skip. `swarm audit` proves the recorded history is internally consistent and untampered — under the assumption the harness wrote it.
+It's a rebuild of the operating model in [`moopgit/fleet`](https://github.com/moopgit/fleet). The fleet's rules are good, but they live in about 2,200 markdown files and are mostly enforced by agents remembering to follow them. The fleet's own 2026-10-11 hard-rule audit ([`fleet/hard-rule-audit.md`](https://github.com/moopgit/fleet/blob/main/fleet/hard-rule-audit.md), line 31) counts its structural rules as "13 (4 enforced, 9 buildable; 2 built today)". Here, the rules that govern agent work (lanes, approvals, review, escalation, budgets) are code paths an agent can't skip. `swarm audit` proves the recorded history is internally consistent and untampered — under the assumption the harness wrote it.
 
 ## What it does
 
@@ -130,7 +130,7 @@ swarm/
 
 ## Status and limits
 
-- 109 tests cover the rules above with a scripted team, including adversarial ledger constructions for the audit. The Claude request shape is checked against the Anthropic SDK (1.15) at the HTTP layer, but it hasn't been run against the live API from this repo yet. Do a small paid run before relying on it.
+- 137 tests cover the rules above with a scripted team, including adversarial ledger constructions for the audit. The Claude request shape is checked against the Anthropic SDK (1.15) at the HTTP layer, but it hasn't been run against the live API from this repo yet. Do a small paid run before relying on it.
 - Costs are estimates from token counts and the price table in `config.py` (override under `prices:`).
 - `run_command` is as powerful as the commands you allow. Allowing `python3 -m pytest` lets a seat run any test file it writes.
 - The PII scanner is pattern-based (emails, US phone numbers, SSNs, card numbers). It catches the obvious cases, not everything.
