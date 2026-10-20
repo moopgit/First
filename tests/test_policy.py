@@ -10,7 +10,9 @@ from swarm import policy as pol
 @pytest.mark.parametrize("text", [
     "approved", "Approved.", "yes", "yes, go", "go ahead", "ship it", "LGTM", "do it",
     "Approved, no changes", "Yes, go, no changes", "approved - no notes", "No problem, ship it",
-    "go ahead, no further changes needed",
+    "go ahead, no further changes needed", "Approved, no change", "Go, no rush", "Approved, no blockers",
+    "No complaints, ship it", "Approved, no further comments", "Yes - no concerns", "Not a problem, approved",
+    "Approved, no changes required", "Approved, no notes from me", "Approved. Nothing to add.",
 ])
 def test_explicit_approvals_pass(text):
     assert pol.approval_problem(text) is None
@@ -20,6 +22,12 @@ def test_explicit_approvals_pass(text):
     "should be in I think", "approved?", "maybe go", "not approved", "no", "I guess so", "yes but hold off",
     "", "looks interesting", "go, unless legal objects",
     "approved, not the README", "no go", "Approved, no changes. Hold the Buzz part",
+    # rejections and exclusions that contain a benign phrase's words (adversarial verification, 2026-10-20)
+    "No, changes needed. Go back and fix them.", "No. Changes needed first, then go.", "No; notes attached. Go revise.",
+    "No! Questions remain, go answer them", "Approved, no changes to the README", "Go, no changes to the database",
+    "Approved - no changes until legal signs off", "No objections, go once legal signs off",
+    "Yes, no issues except the deploy step - skip that", "Approved. No changes needed, except drop section 3",
+    "Approved, no notes, but skip the README",
 ])
 def test_ambiguous_or_negative_replies_are_refused(text):
     assert pol.approval_problem(text) is not None

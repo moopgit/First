@@ -100,23 +100,38 @@ HEDGES = (
     "i think", "maybe", "probably", "perhaps", "should", "might", "could", "not sure", "unsure",
     "if you", "unless", "i guess", "kind of", "sort of", "wait", "hold", "later", "no", "not", "don't", "dont",
 )
-# Negative words inside these phrases add to an approval rather than qualify it ("Approved, no changes").
-# Anywhere else, a hedge still refuses: the harness runs the whole queued action, so a partial or
-# conditional yes ("approved, not the README") must come back as a question.
+# A clause that is exactly one of these adds to an approval rather than qualifying it ("Approved, no
+# changes"), so its "no" isn't a hedge. Only whole clauses count, read before punctuation is dropped:
+# "No, changes needed" is two clauses and stays a refusal, and "no changes to the README" is an
+# exclusion, not this phrase. If the reply also states a condition, no clause is excused: the harness
+# runs the whole queued action, so a partial or conditional yes must come back as a question.
+_NOUNS = (r"changes?|edits?|notes?|nits?|comments?|concerns?|objections?|issues?|questions?|worries|blockers?"
+          r"|complaints?|feedback|modifications?|amendments?|problems?")
 BENIGN = re.compile(
-    r"(?<!\S)(?:no (?:further )?changes(?: needed)?|no (?:edits|notes|comments|concerns|objections|issues|questions|worries)"
-    r"|no problems?|not a problem|nothing (?:to add|to change|further))(?!\S)"
+    rf"no (?:(?:further|more|other) )?(?:{_NOUNS})(?: needed| required| from me| at all)?|no rush|no need for changes"
+    r"|not a problem|nothing (?:to add|to change|further)"
 )
+CONDITIONS = ("except", "but", "until", "once", "only", "without", "other than", "provided", "as long as", "if",
+              "unless", "after", "before")
+_CLAUSE_BREAK = re.compile(r"[,.;:!()\[\]\n\u2014\u2013]|\s-+\s")
+
+
+def _words(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z' ]+", " ", text.lower()).split())
 
 
 def approval_problem(text: str) -> str | None:
     """None if `text` is an explicit approval, else why it isn't."""
-    norm = " ".join(re.sub(r"[^a-z' ]+", " ", (text or "").lower()).split())
-    if not norm:
+    raw = text or ""
+    if not _words(raw):
         return "approval text is empty"
-    if "?" in (text or ""):
+    if "?" in raw:
         return "that reads as a question, not an approval"
-    padded = f" {BENIGN.sub(' ', norm)} "
+    clauses = [c for c in (_words(part) for part in _CLAUSE_BREAK.split(raw)) if c]
+    whole = f" {' '.join(clauses)} "
+    if not any(f" {c} " in whole for c in CONDITIONS):
+        clauses = [c for c in clauses if not BENIGN.fullmatch(c)]
+    padded = f" {' '.join(clauses)} "
     hedge = next((h for h in HEDGES if f" {h} " in padded), None)
     if hedge:
         return f"contains {hedge!r}, which makes it ambiguous"
