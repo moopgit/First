@@ -1,0 +1,83 @@
+# The fleet's core seats, ported from moopgit/fleet (roster.md). The rules the
+# fleet locked in prose are settings here, and the harness enforces them:
+#   builder never owns the verdict (reviewers) · structural actions need the
+#   governor's explicit yes (structural_*) · 3 failed verify->fix cycles escalate
+#   (max_fix_cycles) · red-line content never produces traces (redline_classes)
+governor: Andy
+workspace: workspace
+state_dir: .swarm
+model: claude-opus-5-5
+effort: high
+concurrency: 5
+
+budgets:
+  task_turns: 60
+  task_cost_usd: 4.00
+  run_cost_usd: 25.00
+  max_tasks: 20
+  max_fix_cycles: 3
+  max_delegation_depth: 2
+
+policy:
+  structural_paths: ["outbound/*", "decisions/*"]   # outward drafts and shared fleet records
+  structural_commands: ["git push", "git commit"]
+  private_paths: [".env", "*.pem", "*.key", "private/*", "job-search/*"]
+  pii_scan: true
+  pii_allow: ['@example\.com$']
+  content_classes: [general, research, product, process, pii, job-search, calibration-private]
+  redline_classes: [pii, job-search, calibration-private]
+
+seats:
+  main:
+    role: router
+    lane: Routing, dispatch and synthesis; Andy's front door
+    charter: |
+      You plan and route; the lanes do the work. Team consensus is a recommendation, never Andy's approval.
+      Mark anything outward-facing, hard to reverse, or about money, people or commitments as consequential.
+    tools: [read_file, list_files, search_files, write_file]
+    writes: ["briefs/*"]
+
+  agentic-ai:
+    lane: AI research, deep dives and synthesis
+    charter: |
+      Tag every claim with its evidence status: verified live, from an index or summary only, or unverified.
+      Prefer primary sources in the workspace over memory.
+    writes: ["research/*"]
+    reviewers: [meta]
+
+  strategy:
+    lane: Strategic direction, recommendations and red-pen review
+    charter: |
+      Lead with the recommendation and why. Name the options you rejected and what would change your mind.
+    writes: ["strategy/*"]
+    reviewers: [meta]
+
+  writing:
+    lane: Copy, voice guides and outward drafts
+    charter: |
+      Before any outward draft, read voice/VOICE.md fresh if it exists and match the register to the medium.
+      Plain terms first: say what something is before naming it.
+    writes: ["drafts/*", "outbound/*"]
+    reviewers: [strategy]
+
+  build:
+    lane: Product build - code and tests
+    charter: |
+      Show, don't tell: a change is done when its tests run green, not when it reads right.
+    tools: [read_file, list_files, search_files, write_file, run_command]
+    writes: ["src/*", "tests/*"]
+    commands: ["python3 -m pytest", "git status", "git diff", "git commit", "git push"]
+    checks: ["python3 -m pytest -q"]
+    reviewers: [code-review]
+
+  code-review:
+    role: reviewer
+    lane: Code review, architecture and standing checklists; final sign-off on builds
+    tools: [read_file, list_files, search_files, run_command]
+    commands: ["python3 -m pytest", "git diff"]
+
+  meta:
+    role: reviewer
+    lane: Process evaluation and independent checks on research and strategy
+    charter: |
+      Check claims against the evidence in the workspace, not against the summary. Grader is never gradee.

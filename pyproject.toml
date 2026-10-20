@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarm-harness"
+version = "0.1.0"
+description = "A code-enforced harness for a team of Claude agents: parallel dispatch, composed gates, governor approvals, hash-chained ledger."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["anthropic>=1.15,<2", "pyyaml>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+swarm = "swarm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["swarm*"]
+
+[tool.setuptools.package-data]
+swarm = ["templates/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

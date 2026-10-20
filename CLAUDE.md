@@ -5,20 +5,35 @@ This file provides guidance to AI assistants (Claude Code and others) working in
 ## Repository Overview
 
 **Repository**: moopgit/First
-**Status**: Freshly initialized — no source files committed yet.
-
-This repository was created with a feature branch (`claude/add-claude-documentation-Mcpy3`) and contains no application code as of the initial setup. This CLAUDE.md serves as the foundational guide for AI assistants contributing to this project.
+**Status**: Holds `swarm`, a code-enforced harness for running a team of Claude agents. It rebuilds the operating model from `moopgit/fleet` so its rules are enforced by code instead of prose. See README.md.
 
 ---
 
 ## Repository Structure
 
-As of initial setup, only this `CLAUDE.md` exists. Update this section as the project grows:
-
 ```
 First/
-└── CLAUDE.md          # This file — AI assistant guidance
+├── swarm/             # the harness package (entry point: swarm/cli.py, `swarm` command)
+│   └── templates/     # starter swarm.yaml files (basic, fleet)
+├── tests/             # pytest suite; runs offline against scripted providers
+├── pyproject.toml     # package metadata and dependencies
+├── README.md          # what it is, how to use it, design
+└── CLAUDE.md          # this file
 ```
+
+## Language, Dependencies, Tests
+
+- Python 3.10+. Runtime deps: `anthropic` (1.x SDK), `pyyaml`. Dev: `pytest`.
+- Install: `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`
+- Tests: `.venv/bin/python -m pytest -q` (no network or API key needed).
+- Offline smoke test: `swarm init && swarm run --demo "<goal>" && swarm audit` in a scratch directory.
+
+## Key Conventions
+
+- The ledger (`swarm/ledger.py`) is the only state the harness writes. Status, counts and the inbox are projections (`swarm/state.py`). Never add stored state that duplicates the ledger.
+- A rule the harness enforces is declared and validated in `swarm/config.py`, enforced in `swarm/tools.py` or `swarm/orchestrator.py`, and checked by `swarm/audit.py` where the ledger can show it held. Add a test in `tests/test_orchestrator.py` for every new rule.
+- Agents act only through the dedicated tools in `swarm/tools.py`. Don't add a general shell tool.
+- Model calls go through `swarm/providers.py` only. Transcripts are append-only: never edit or drop earlier messages.
 
 ---
 

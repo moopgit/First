@@ -1,0 +1,43 @@
+# swarm.yaml: the rules your team runs under. Every setting here is enforced in code.
+governor: You                  # the only human on the team, and the only one who approves
+workspace: workspace           # the seats' sandbox, relative to this file
+state_dir: .swarm              # ledger, transcripts and results; seats can't read it
+model: claude-opus-5-5
+effort: high
+concurrency: 4                 # tasks that run at the same time
+
+budgets:
+  task_turns: 60
+  task_cost_usd: 3.00
+  run_cost_usd: 20.00
+  max_tasks: 12
+  max_fix_cycles: 3            # failed check/review cycles before a task comes to you
+  max_delegation_depth: 2
+
+policy:
+  structural_paths: ["outbound/*"]   # writes here wait for your explicit approval
+  structural_commands: []
+  private_paths: [".env", "*.pem", "*.key", "private/*"]
+  pii_scan: true
+  pii_allow: ['@example\.com$']
+
+seats:
+  lead:
+    role: router
+    lane: Plans the work, routes it to the right seat, and writes the final answer
+    tools: [read_file, list_files, search_files, write_file]
+    writes: ["final/*"]
+
+  researcher:
+    lane: Research and analysis from the material in the workspace
+    writes: ["research/*"]
+    reviewers: [reviewer]
+
+  writer:
+    lane: Clear, plain-language drafts, summaries and one-pagers
+    writes: ["drafts/*", "outbound/*"]
+    reviewers: [reviewer]
+
+  reviewer:
+    role: reviewer
+    lane: Independent review of other seats' work against the acceptance criteria
