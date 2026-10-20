@@ -12,6 +12,7 @@ from conftest import (
 
 from swarm.audit import audit
 from swarm.orchestrator import AmbiguousApproval, ConfigDrift, HarnessError, Orchestrator, RunBusy
+from swarm.provenance import build, invoker, principal
 from swarm.providers import ProviderFatal
 
 
@@ -226,7 +227,10 @@ def test_structural_write_waits_for_an_explicit_yes_and_runs_exactly_as_queued(c
     for hedged in ("should be in I think", "approved?", "maybe go", "not approved", ""):
         with pytest.raises(AmbiguousApproval):
             asyncio.run(o.decide(d.id, granted=True, text=hedged))
-    assert not events(o, "decided"), "an ambiguous reply records nothing"
+    assert not events(o, "decided"), "an ambiguous reply is never recorded as a decision"
+    refused = events(o, "decision_refused")
+    assert [e["data"]["text"] for e in refused] == ["should be in I think", "approved?", "maybe go", "not approved", ""]
+    assert all(e["data"]["problem"] and e["data"]["provenance"]["user"] for e in refused)
 
     asyncio.run(o.decide(d.id, granted=True, text="approved"))
     assert target.read_text() == "Hello, world"
@@ -472,3 +476,42 @@ def test_audit_flags_a_self_review(cfg):
     o.ledger.append("review", run=rid, task=t.id, actor="research", reviewer="research", verdict="pass", criteria=[], feedback="")
     checks = {c.name: c for c in audit(o.ledger, governor="Andy", max_fix_cycles=3)}
     assert not checks["the builder never owns the verdict"].ok
+
+
+# --- who ran it, and what ran -------------------------------------------------------------
+
+
+def test_decisions_record_who_actually_ran_them(cfg, monkeypatch):
+    o = orch(cfg, team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/x.md", "x")))
+    rid, view = run(o)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    asyncio.run(o.decide(view.inbox[0].id, granted=True, text="approved"))
+    (decided,) = events(o, "decided")
+    who = decided["data"]["provenance"]
+    assert decided["actor"] == principal(invoker()) != "Andy"
+    assert decided["data"]["acting_as"] == "Andy" and who["user"] and "CLAUDECODE" in who["agent_markers"]
+    assert decided["data"]["build"] == build()
+    stated = {"user": "alice", "host": "laptop", "pid": 1, "ppid": 0, "tty": "/dev/pts/3", "agent_markers": []}
+    o2 = orch(cfg, team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/y.md", "y")))
+    rid2, view2 = run(o2)
+    asyncio.run(o2.decide(view2.inbox[0].id, granted=False, text="not yet", provenance=stated))
+    assert events(o2, "decided")[-1]["actor"] == "alice@laptop"
+
+
+def test_audit_flags_a_decision_with_no_record_of_who_ran_it(cfg):
+    o = orch(cfg, team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/x.md", "x")))
+    rid, view = run(o)
+    o.ledger.append("decided", run=rid, task=view.inbox[0].task, actor="Andy", decision=view.inbox[0].id,
+                    granted=True, text="approved")
+    checks = {c.name: c for c in audit(o.ledger, governor="Andy", max_fix_cycles=3)}
+    assert any("no record of who ran" in p for p in checks["approvals are explicit and record who ran them"].problems)
+
+
+def test_every_process_that_drives_a_run_records_its_build(cfg):
+    o = orch(cfg, team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/x.md", "x")))
+    rid, _ = run(o)
+    started = events(o, "run_started")[0]["data"]["build"]
+    assert len(started["source_sha256"]) == 64 and started["version"]
+    assert not events(o, "run_resumed"), "the starting process already recorded its build"
+    asyncio.run(Orchestrator(cfg, o.provider).drive(rid))
+    assert events(o, "run_resumed")[-1]["data"]["build"] == started

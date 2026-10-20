@@ -84,15 +84,21 @@ def audit(ledger: Ledger, *, governor: str, max_fix_cycles: int) -> list[Check]:
             if not trig or not all(isinstance(x, str) and ":" in x and x.split(":", 1)[1] for x in trig):
                 waits.problems.append(f"{e['run']}/{e['task']}: wait at seq {e['seq']} has no valid trigger")
 
-    approvals = Check("approvals are explicit and come from the governor")
+    approvals = Check("approvals are explicit and record who ran them")
     kind_of = {e["data"]["decision"]: e["data"]["kind"] for e in events if e["type"] == "decision_requested"}
     for e in events:
-        if e["type"] == "decided" and e["actor"] != governor:
-            approvals.problems.append(f"{e['data']['decision']}: decided by {e['actor']}, not {governor}")
-        if e["type"] == "decided" and e["data"]["granted"] and kind_of.get(e["data"]["decision"]) != "wait":
-            problem = approval_problem(e["data"]["text"])
+        if e["type"] != "decided":
+            continue
+        d = e["data"]
+        who = d.get("provenance")
+        if not isinstance(who, dict) or not who.get("user"):
+            approvals.problems.append(f"{d['decision']}: no record of who ran the command (seq {e['seq']})")
+        if d.get("acting_as") != governor:
+            approvals.problems.append(f"{d['decision']}: run as {d.get('acting_as')!r}, not as the governor ({governor})")
+        if d["granted"] and kind_of.get(d["decision"]) != "wait":
+            problem = approval_problem(d["text"])
             if problem:
-                approvals.problems.append(f"{e['data']['decision']}: approval text {e['data']['text']!r} - {problem}")
+                approvals.problems.append(f"{d['decision']}: approval text {d['text']!r} - {problem}")
 
     actions = Check("approved actions ran exactly as approved")
     for run in runs.values():

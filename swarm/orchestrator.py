@@ -23,6 +23,7 @@ from .agent import Budget, SeatResult, Transcript, run_seat
 from .config import TIERS, Config, Seat
 from .ledger import Ledger, _canonical
 from .prompts import _handoff, plan_brief, review_brief, seat_system, synth_brief, work_brief
+from .provenance import build, invoker, principal
 from .providers import Provider, ProviderError, ProviderFatal, Turn
 from .state import TERMINAL, DecisionView, RunView, TaskView, project
 from .tools import Executor, Hooks, run_argv, write_text
@@ -56,6 +57,7 @@ class Orchestrator:
         self.provider = provider
         self.ledger = ledger or Ledger(cfg.state_dir)
         self._run_cost: dict[str, float] = {}
+        self._build_logged: set[str] = set()  # runs whose ledger already holds this process's build
 
     # --- views ----------------------------------------------------------------
 
@@ -90,20 +92,26 @@ class Orchestrator:
         (rd / "config.yaml").write_text(self.cfg.source_text)
         self.ledger.append(
             "run_started", run=run_id, actor=requested_by, goal=goal.strip(), requested_by=requested_by,
-            config_hash=self.cfg.hash, provider=self.provider.name, base_dir=str(self.cfg.base_dir), harness=__version__,
+            config_hash=self.cfg.hash, provider=self.provider.name, base_dir=str(self.cfg.base_dir), build=build(),
         )
+        self._build_logged.add(run_id)
         self._create_task(run_id, actor=HARNESS, seat=self.cfg.router.name, mode="plan", goal=goal.strip(),
                           acceptance=[], deps=[], tier="routine", content_class="general", requested_by=requested_by)
         return run_id
 
-    def adopt_config(self, run_id: str) -> None:
+    def adopt_config(self, run_id: str, provenance: dict | None = None) -> None:
         run = self.view(run_id)
         if run.config_hash != self.cfg.hash:
             current = self.run_dir(run_id) / "config.yaml"
             if current.exists():  # keep the rules earlier work ran under, named by their hash, for the audit
                 shutil.copyfile(current, current.with_name(f"config.{run.config_hash[:16]}.yaml"))
             current.write_text(self.cfg.source_text)
-            self.ledger.append("config_adopted", run=run_id, actor=self.cfg.governor, old=run.config_hash, new=self.cfg.hash)
+            self.ledger.append("config_adopted", run=run_id, old=run.config_hash, new=self.cfg.hash, **self._act(provenance))
+
+    def _act(self, provenance: dict | None) -> dict:
+        """Ledger fields for a governor act: who actually ran it, and the role it was run as."""
+        who = provenance or invoker()
+        return {"actor": principal(who), "acting_as": self.cfg.governor, "provenance": who}
 
     def find_decision(self, decision_id: str) -> tuple[RunView, DecisionView]:
         for run in self.runs().values():
@@ -115,35 +123,45 @@ class Orchestrator:
         path = self.run_dir(run_id) / "actions" / f"{decision_id}.json"
         return json.loads(path.read_text()) if path.exists() else None
 
-    async def decide(self, decision_id: str, *, granted: bool, text: str) -> DecisionView:
-        """Record the governor's call. Approvals must be explicit; a granted action runs exactly as queued."""
+    async def decide(self, decision_id: str, *, granted: bool, text: str, provenance: dict | None = None) -> DecisionView:
+        """Record the governor's call. Approvals must be explicit; a granted action runs exactly as queued.
+
+        Every event records who actually ran the command (provenance); the harness can't authenticate a person.
+        A refused attempt is recorded as `decision_refused`, never as a decision.
+        """
         run, d = self.find_decision(decision_id)
         if d.status != "pending":
             raise HarnessError(f"{decision_id} was already {d.status}")
         self._check_config(run)
         text = (text or "").strip()
-        if granted and d.kind != "wait":
-            problem = pol.approval_problem(text)
-            if problem:
-                raise AmbiguousApproval(f"not recorded: {problem}. Approve with explicit words, e.g. \"approved\" or \"yes, go\".")
-        if not text:
-            raise HarnessError("give a reason or an answer; the seat uses your words to continue")
+        act = self._act(provenance)
+        refusal: HarnessError | None = None
+        problem = pol.approval_problem(text) if granted and d.kind != "wait" else None
+        if problem:
+            refusal = AmbiguousApproval(f"refused: {problem}. Approve with explicit words, e.g. \"approved\" or \"yes, go\".")
+        elif not text:
+            problem = "no reason or answer given"
+            refusal = HarnessError("give a reason or an answer; the seat uses your words to continue")
+        if refusal:
+            self.ledger.append("decision_refused", run=run.id, task=d.task, decision=d.id, granted=granted, text=text,
+                               problem=problem, **act)
+            raise refusal
         gov = self.cfg.governor
-        self.ledger.append("decided", run=run.id, task=d.task, actor=gov, decision=d.id, granted=granted, text=text)
+        self.ledger.append("decided", run=run.id, task=d.task, decision=d.id, granted=granted, text=text, build=build(), **act)
         if d.kind == "action" and granted:
             await self._execute_action(run.id, d)
         elif d.kind == "review":
-            self.ledger.append("review", run=run.id, task=d.task, actor=gov, reviewer=gov,
-                               verdict="pass" if granted else "fail", criteria=[], feedback=text)
+            self.ledger.append("review", run=run.id, task=d.task, reviewer=gov, verdict="pass" if granted else "fail",
+                               criteria=[], feedback=text, **act)
             if granted:
                 self._complete(run.id, d.task)
             else:
                 self._record_fix_cycle(run.id, d.task, f"{gov} sent it back: {text}")
         elif d.kind == "escalation":
             if granted:
-                self.ledger.append("retry", run=run.id, task=d.task, actor=gov, note=text)
+                self.ledger.append("retry", run=run.id, task=d.task, note=text, **act)
             else:
-                self.ledger.append("parked", run=run.id, task=d.task, actor=gov, reason=text)
+                self.ledger.append("parked", run=run.id, task=d.task, reason=text, **act)
         return self.view(run.id).decisions[d.id]
 
     # --- the run loop ---------------------------------------------------------
@@ -178,8 +196,10 @@ class Orchestrator:
     async def _drive(self, run_id: str) -> RunView:
         run = self.view(run_id)
         self._run_cost[run_id] = run.cost
-        if run.paused or any(t.status in ("running", "review") for t in run.tasks.values()):
-            self.ledger.append("run_resumed", run=run_id, actor=HARNESS)
+        if run_id not in self._build_logged or run.paused or any(t.status in ("running", "review") for t in run.tasks.values()):
+            # Every process that drives a run records the code it is running.
+            self.ledger.append("run_resumed", run=run_id, actor=HARNESS, build=build())
+            self._build_logged.add(run_id)
         running: dict[str, asyncio.Task] = {}
         try:
             while True:
