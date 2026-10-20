@@ -12,7 +12,9 @@ prompt caching and preserved thinking valid) and persists them to disk.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -27,6 +29,14 @@ class ProviderError(RuntimeError):
 
 class ProviderFatal(RuntimeError):
     """The model can't be called at all (credentials, permissions); the run pauses."""
+
+
+class MissingCredentials(ProviderFatal):
+    """No Anthropic credential resolves in this shell."""
+
+
+class CredentialMismatch(ProviderFatal):
+    """This shell would bill a different credential than the one the run started with."""
 
 
 @dataclass
@@ -64,6 +74,8 @@ class Turn:
 class Provider(Protocol):
     name: str
 
+    def credential_id(self) -> str: ...
+
     async def complete(
         self,
         *,
@@ -83,6 +95,21 @@ class AnthropicProvider:
     def __init__(self, client: Any = None, *, fallbacks: bool = True):
         self._client = client
         self.fallbacks = fallbacks
+
+    def credential_id(self) -> str:
+        """Which credential the SDK will bill, without exposing it: its source plus a short fingerprint.
+
+        Mirrors the SDK's precedence: API key, then auth token, then a named profile or federation,
+        then whatever login is stored on this machine.
+        """
+        for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+            if os.environ.get(var):
+                return f"{var}#{hashlib.sha256(os.environ[var].encode()).hexdigest()[:12]}"
+        if os.environ.get("ANTHROPIC_PROFILE"):
+            return f"profile:{os.environ['ANTHROPIC_PROFILE']}"
+        if os.environ.get("ANTHROPIC_FEDERATION_RULE_ID"):
+            return f"federation:{os.environ['ANTHROPIC_FEDERATION_RULE_ID']}"
+        return "stored-login"
 
     @property
     def client(self) -> Any:
@@ -131,6 +158,14 @@ class AnthropicProvider:
             raise ProviderError(f"API error {e.status_code}: {getattr(e, 'message', e)}") from e
         except anthropic.APIConnectionError as e:
             raise ProviderError(f"network error after retries: {e}") from e
+        except TypeError as e:
+            # The SDK raises a bare TypeError at request time when no credential resolves.
+            if "authentication method" not in str(e):
+                raise
+            raise MissingCredentials(
+                "no Anthropic credential in this shell - export the run's ANTHROPIC_API_KEY here, or record the "
+                "decision with --no-resume and run `swarm resume` from the shell that holds the key"
+            ) from e
 
         u = resp.usage
         category = None
@@ -167,6 +202,9 @@ class ScriptedProvider:
         self.delay = delay
         self.calls: list[dict] = []
         self._n = 0
+
+    def credential_id(self) -> str:
+        return self.name
 
     async def complete(self, *, model, effort, max_tokens, system, messages, tools, meta) -> Turn:
         self.calls.append({"meta": dict(meta), "messages": json.loads(json.dumps(messages)), "tools": [t["name"] for t in tools]})

@@ -30,6 +30,7 @@ FIELDS: dict[str, dict[str, object]] = {
     "decided": {"decision": "", "granted": False, "text": ""},
     "action_executed": {"decision": "", "action_hash": ""},
     "config_adopted": {"new": ""},
+    "credential_adopted": {"new": ""},
     "run_paused": {"reason": ""},
     "run_finished": {"status": ""},
 }
@@ -127,6 +128,7 @@ class RunView:
     config_hash: str
     provider: str
     started_at: str
+    credential: str = ""
     tasks: dict[str, TaskView] = field(default_factory=dict)
     decisions: dict[str, DecisionView] = field(default_factory=dict)
     cost: float = 0.0
@@ -179,7 +181,8 @@ def project(events: list[dict], problems: list[str] | None = None) -> dict[str, 
             continue
         typ, d, rid = e["type"], e["data"], e["run"]
         if typ == "run_started":
-            runs[rid] = RunView(rid, d["goal"], d["requested_by"], d["config_hash"], str(d.get("provider", "")), e["ts"])
+            runs[rid] = RunView(rid, d["goal"], d["requested_by"], d["config_hash"], str(d.get("provider", "")), e["ts"],
+                                credential=str(d.get("credential", "")))
             continue
         run = runs.get(rid)
         if run is None:
@@ -241,6 +244,8 @@ def project(events: list[dict], problems: list[str] | None = None) -> dict[str, 
                 dec.executed = d
         elif typ == "config_adopted":
             run.config_hash = d["new"]
+        elif typ == "credential_adopted":
+            run.credential = d["new"]
         elif typ == "run_paused":
             run.paused = d["reason"]
         elif typ == "run_resumed":

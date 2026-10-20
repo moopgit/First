@@ -25,17 +25,20 @@ def _provider(kind: str, cfg: Config):
     raise HarnessError(f"runs made with the {kind!r} provider can't be continued from the command line")
 
 
-def _for_run(cfg: Config, run_id: str, *, adopt: bool = False) -> Orchestrator:
+def _for_run(cfg: Config, run_id: str, *, adopt: bool = False, adopt_credential: bool = False) -> Orchestrator:
     """An orchestrator bound to the rules the run started under (or the current rules, if adopted)."""
     probe = Orchestrator(cfg)
     run = probe.view(run_id)
     if adopt:
         orch = Orchestrator(cfg, _provider(run.provider, cfg))
         orch.adopt_config(run_id)
-        return orch
-    snap = probe.run_dir(run_id) / "config.yaml"
-    run_cfg = parse_config(snap.read_text(), base_dir=cfg.base_dir) if snap.exists() else cfg
-    return Orchestrator(run_cfg, _provider(run.provider, run_cfg))
+    else:
+        snap = probe.run_dir(run_id) / "config.yaml"
+        run_cfg = parse_config(snap.read_text(), base_dir=cfg.base_dir) if snap.exists() else cfg
+        orch = Orchestrator(run_cfg, _provider(run.provider, run_cfg))
+    if adopt_credential:
+        orch.adopt_credential(run_id)
+    return orch
 
 
 def _latest(orch: Orchestrator) -> str:
@@ -76,7 +79,8 @@ def cmd_run(args, cfg: Config) -> int:
 def cmd_resume(args, cfg: Config) -> int:
     orch = Orchestrator(cfg)
     run_id = args.run or _latest(orch)
-    return asyncio.run(_drive_and_show(_for_run(cfg, run_id, adopt=args.adopt_config), run_id))
+    orch = _for_run(cfg, run_id, adopt=args.adopt_config, adopt_credential=args.adopt_credential)
+    return asyncio.run(_drive_and_show(orch, run_id))
 
 
 def cmd_status(args, cfg: Config) -> int:
@@ -117,6 +121,9 @@ def cmd_decide(args, cfg: Config, granted: bool) -> int:
     except RunBusy as e:
         print(e)
         return 0
+    except ProviderFatal as e:
+        print(f"swarm: {d.id} is recorded, but this shell can't continue {run.id}: {e}", file=sys.stderr)
+        return 1
 
 
 def cmd_log(args, cfg: Config) -> int:
@@ -157,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("resume", help="continue a paused or interrupted run")
     p.add_argument("run", nargs="?")
     p.add_argument("--adopt-config", action="store_true", help="move the run to the current swarm.yaml")
+    p.add_argument("--adopt-credential", action="store_true", help="move the run to the credential this shell would bill")
 
     p = sub.add_parser("status", help="show a run's board")
     p.add_argument("run", nargs="?")

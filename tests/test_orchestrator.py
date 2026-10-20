@@ -13,7 +13,7 @@ from conftest import (
 from swarm.audit import audit
 from swarm.orchestrator import AmbiguousApproval, ConfigDrift, HarnessError, Orchestrator, RunBusy
 from swarm.provenance import build, invoker, principal
-from swarm.providers import ProviderFatal
+from swarm.providers import AnthropicProvider, CredentialMismatch, MissingCredentials, ProviderFatal, ScriptedProvider
 
 
 def audit_ok(o: Orchestrator) -> None:
@@ -478,7 +478,7 @@ def test_audit_flags_a_self_review(cfg):
     assert not checks["the builder never owns the verdict"].ok
 
 
-# --- who ran it, and what ran -------------------------------------------------------------
+# --- who ran it, what ran, and which credential pays -------------------------------------
 
 
 def test_decisions_record_who_actually_ran_them(cfg, monkeypatch):
@@ -515,3 +515,44 @@ def test_every_process_that_drives_a_run_records_its_build(cfg):
     assert not events(o, "run_resumed"), "the starting process already recorded its build"
     asyncio.run(Orchestrator(cfg, o.provider).drive(rid))
     assert events(o, "run_resumed")[-1]["data"]["build"] == started
+
+
+class _KeyedProvider(ScriptedProvider):
+    def __init__(self, script, credential):
+        super().__init__(script)
+        self.name, self._credential = "scripted", credential
+
+    def credential_id(self):
+        return self._credential
+
+
+def test_resuming_with_a_different_credential_is_a_named_failure(cfg):
+    script = team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/x.md", "x") if turns(msgs) == 0 else submit("ok", ["outbound/x.md"]))
+    o = Orchestrator(cfg, _KeyedProvider(script, "ANTHROPIC_API_KEY#aaaaaaaaaaaa"))
+    rid, view = run(o)
+    asyncio.run(o.decide(view.inbox[0].id, granted=True, text="approved"))
+    other = Orchestrator(cfg, _KeyedProvider(script, "stored-login"))
+    turns_before = len(events(o, "turn"))
+    with pytest.raises(CredentialMismatch, match="stored-login"):
+        asyncio.run(other.drive(rid))
+    assert not events(o, "escalated") and len(events(o, "turn")) == turns_before, "nothing ran on the wrong credential"
+    other.adopt_credential(rid)
+    assert events(o, "credential_adopted")[0]["data"]["new"] == "stored-login"
+    assert asyncio.run(other.drive(rid)).status == "done"
+
+
+class _NoCredentialClient:
+    class beta:
+        class messages:
+            @staticmethod
+            async def create(**kwargs):
+                raise TypeError('"Could not resolve authentication method. Expected one of api_key, auth_token, or credentials to be set."')
+
+
+def test_no_credential_in_the_shell_pauses_the_run_instead_of_escalating_every_task(cfg):
+    o = Orchestrator(cfg, AnthropicProvider(_NoCredentialClient()))
+    rid = o.start("ship it", "Andy")
+    with pytest.raises(MissingCredentials, match="no Anthropic credential"):
+        asyncio.run(o.drive(rid))
+    view = o.view(rid)
+    assert "model unavailable" in view.paused and not events(o, "escalated")

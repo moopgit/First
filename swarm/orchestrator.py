@@ -24,7 +24,7 @@ from .config import TIERS, Config, Seat
 from .ledger import Ledger, _canonical
 from .prompts import _handoff, plan_brief, review_brief, seat_system, synth_brief, work_brief
 from .provenance import build, invoker, principal
-from .providers import Provider, ProviderError, ProviderFatal, Turn
+from .providers import CredentialMismatch, Provider, ProviderError, ProviderFatal, Turn
 from .state import TERMINAL, DecisionView, RunView, TaskView, project
 from .tools import Executor, Hooks, run_argv, write_text
 
@@ -92,7 +92,8 @@ class Orchestrator:
         (rd / "config.yaml").write_text(self.cfg.source_text)
         self.ledger.append(
             "run_started", run=run_id, actor=requested_by, goal=goal.strip(), requested_by=requested_by,
-            config_hash=self.cfg.hash, provider=self.provider.name, base_dir=str(self.cfg.base_dir), build=build(),
+            config_hash=self.cfg.hash, provider=self.provider.name, credential=self.provider.credential_id(),
+            base_dir=str(self.cfg.base_dir), build=build(),
         )
         self._build_logged.add(run_id)
         self._create_task(run_id, actor=HARNESS, seat=self.cfg.router.name, mode="plan", goal=goal.strip(),
@@ -107,6 +108,13 @@ class Orchestrator:
                 shutil.copyfile(current, current.with_name(f"config.{run.config_hash[:16]}.yaml"))
             current.write_text(self.cfg.source_text)
             self.ledger.append("config_adopted", run=run_id, old=run.config_hash, new=self.cfg.hash, **self._act(provenance))
+
+    def adopt_credential(self, run_id: str, provenance: dict | None = None) -> None:
+        """Deliberately move a run to the credential this shell would bill."""
+        run = self.view(run_id)
+        new = self.provider.credential_id() if self.provider else ""
+        if new and run.credential != new:
+            self.ledger.append("credential_adopted", run=run_id, old=run.credential, new=new, **self._act(provenance))
 
     def _act(self, provenance: dict | None) -> dict:
         """Ledger fields for a governor act: who actually ran it, and the role it was run as."""
@@ -173,6 +181,12 @@ class Orchestrator:
         if self.provider is None:
             raise HarnessError("driving a run needs a model provider")
         self._check_config(run)
+        current = self.provider.credential_id()
+        if run.credential and current != run.credential:
+            raise CredentialMismatch(
+                f"{run_id} started on credential {run.credential}, but this shell would bill {current}. Export the run's "
+                f"key in this shell, or run `swarm resume {run_id} --adopt-credential` to move the run deliberately."
+            )
         with self._driver_lock(run_id):
             return await self._drive(run_id)
 
