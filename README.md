@@ -2,7 +2,7 @@
 
 A harness for running a team of Claude agents ("seats") under rules that are enforced in code.
 
-It's a rebuild of the operating model in [`moopgit/fleet`](https://github.com/moopgit/fleet). The fleet's rules are good, but they live in about 2,200 markdown files and are mostly enforced by agents remembering to follow them. The fleet's own 2026-10-11 hard-rule audit found 4 of 13 structural rules actually enforced. Here, the rules that govern agent work (lanes, approvals, review, escalation, budgets) are code paths: an agent can't skip them, and `swarm audit` can prove they held.
+It's a rebuild of the operating model in [`moopgit/fleet`](https://github.com/moopgit/fleet). The fleet's rules are good, but they live in about 2,200 markdown files and are mostly enforced by agents remembering to follow them. The fleet's own 2026-10-11 hard-rule audit ([`fleet/hard-rule-audit.md`](https://github.com/moopgit/fleet/blob/main/fleet/hard-rule-audit.md), line 31) counts 4 of 13 structural rules enforced, two of them built that day. Here, the rules that govern agent work (lanes, approvals, review, escalation, budgets) are code paths an agent can't skip. `swarm audit` proves the recorded history is internally consistent and untampered — under the assumption the harness wrote it.
 
 ## What it does
 
@@ -20,7 +20,7 @@ goal ─▶ router plans ─▶ seats work in parallel ─▶ mechanical gates �
 | Fleet incident or rule (source) | Before: prose + vigilance | Now: mechanism |
 |---|---|---|
 | Main chat is a serial bottleneck (AGENTS.md, sanity check) | One chat relays everything | Router plans; independent tasks run concurrently (`concurrency:`) |
-| "Should be in I think" treated as approval (dispatch-ledger case study) | Rule says ask first | Hedged or questioning replies are refused; nothing is recorded until you use explicit words |
+| "Should be in I think" treated as approval (dispatch-ledger case study) | Rule says ask first | Hedged or questioning replies are refused and logged as refusals; nothing executes until you use explicit words |
 | Structural actions need Andy's yes (AGENTS.md) | Agent decides what's structural | Writes/commands matching `structural_*` don't run; they queue, and approval executes the exact queued action (hash-checked) |
 | Builder never owns the verdict (S9) | Script checks after the fact | A seat can't be configured to review itself; reviewer runs in a fresh transcript |
 | 3 failed verify→fix cycles escalate (S8, unbuilt) | Counter nobody kept | Counted per task; the 3rd failure lands in your inbox |
@@ -59,7 +59,7 @@ swarm run "Compare our three pricing options and recommend one, with the risks"
 | `swarm inbox --show D3` | One item in full, including the exact file content or command that would run |
 | `swarm approve D3 "approved"` | Grants it and continues the run. Needs explicit words (approved / yes / go / do it / ship it); "I think so?" is refused |
 | `swarm deny D3 "not public yet"` | Denies it; the seat gets your reason and adapts. Denying an escalation parks the task |
-| `swarm resume [RUN]` | Continues a paused or interrupted run from its checkpoints |
+| `swarm resume [RUN]` | Continues a paused or interrupted run from its checkpoints, on the credential it started with (`--adopt-credential` switches deliberately) |
 | `swarm log [RUN] [--task T4]` | Every event, in order |
 | `swarm audit` | Checks the whole ledger against the invariants below. Exit code 1 if any fail |
 
@@ -92,15 +92,19 @@ Tiers: the planner marks each task `routine` (a peer seat reviews) or `consequen
 
 ## What `swarm audit` checks
 
+`swarm audit` proves the recorded history is internally consistent and untampered — under the assumption the harness wrote it. It checks:
+
 1. The ledger's hash chain is intact (no edited or deleted events).
-2. Every run and task has an authorizing source.
-3. No task was reviewed by the seat that built it.
-4. Every finished task passed its mechanical gates and then an independent review, after its last submission.
-5. Every wait names a resume trigger.
-6. Every approval was explicit and came from the governor.
-7. Every approved action ran exactly as approved.
-8. No task kept working past the fix-cycle cap.
-9. No task is left "running" in a stopped run.
+2. Every event is structurally complete. Missing or mistyped fields are findings, not crashes.
+3. Every run and task has an authorizing source.
+4. Every event belongs to a started run, and every task event to a created task (no phantom tasks).
+5. No task was reviewed by the seat that built it.
+6. Every finished task ran the full configured gate set (artifacts, secret scan, PII scan unless the task is red-line, and the seat's checks) and passed all of it before an independent review passed, in its last submission window. In every window, gates come before the review, and each gate's `passed` agrees with its findings. The gate set comes from the run's config snapshot, verified against the hash the ledger recorded; with no matching snapshot, the check fails.
+7. Every wait names a resume trigger.
+8. Every approval was explicit and records who ran the command and the role it was run as.
+9. Every approved action ran exactly as approved.
+10. No task kept working past the fix-cycle cap.
+11. No task is left "running" in a stopped run.
 
 ## How it's built
 
@@ -109,7 +113,8 @@ swarm/
   config.py        swarm.yaml schema and validation
   ledger.py        append-only, hash-chained, multi-process-safe event log
   state.py         runs, tasks and the inbox, projected from the ledger
-  policy.py        sandboxing, lanes, structural actions, approval wording, secret/PII scanners
+  policy.py        sandboxing, lanes, structural actions, configured gates, approval wording, secret/PII scanners
+  provenance.py    who ran each command, and which build of the code was running
   tools.py         the tools seats act through, and the policy-enforcing executor
   agent.py         one seat's tool-use loop, checkpointed transcript, budget
   orchestrator.py  planning, parallel scheduling, gates, review, inbox, resume
@@ -121,14 +126,16 @@ swarm/
 - **Model calls:** Claude Opus 5.5 by default (`model:` per seat to change it), adaptive thinking, effort set per seat, prompt caching on the static prefix and the conversation tail, and server-side refusal fallbacks (`fallbacks: "default"`) on models that support them. Tool schemas are strict.
 - **Agents act only through dedicated tools** (read, list, search, write, run allowlisted command, delegate, wait, escalate, submit), so every action can be gated and logged. Commands run without a shell, in the workspace, with credential-like environment variables stripped.
 - **History is append-only.** Transcripts are checkpointed after every step, so a crash or a pause resumes exactly where it stopped, and the prompt cache stays warm.
-- **State lives in `.swarm/`** next to `swarm.yaml`: `ledger.jsonl`, `traces.jsonl`, and `runs/<id>/` (config snapshot, transcripts, queued actions, submission snapshots, `RESULT.md`).
+- **State lives in `.swarm/`** next to `swarm.yaml`: `ledger.jsonl`, `traces.jsonl`, and `runs/<id>/` (config snapshots, transcripts, queued actions, submission snapshots, `RESULT.md`).
 
 ## Status and limits
 
-- 70 tests cover the rules above with a scripted team. The Claude request shape is checked against the Anthropic SDK (1.15) at the HTTP layer, but it hasn't been run against the live API from this repo yet. Do a small paid run before relying on it.
+- 109 tests cover the rules above with a scripted team, including adversarial ledger constructions for the audit. The Claude request shape is checked against the Anthropic SDK (1.15) at the HTTP layer, but it hasn't been run against the live API from this repo yet. Do a small paid run before relying on it.
 - Costs are estimates from token counts and the price table in `config.py` (override under `prices:`).
 - `run_command` is as powerful as the commands you allow. Allowing `python3 -m pytest` lets a seat run any test file it writes.
 - The PII scanner is pattern-based (emails, US phone numbers, SSNs, card numbers). It catches the obvious cases, not everything.
+- Decisions record who ran the command (OS user, host, terminal, and whether an AI agent session's environment markers were present) and the code build. That's provenance, not authentication: anyone with shell access to `.swarm/` can run `swarm approve`.
+- A run is bound to the credential it started with. Resuming from a shell that would bill a different one, or has none, stops with a named error instead of escalating every task.
 - One machine, one ledger. There's no web UI; `swarm status` is the board.
 
 ## Development
