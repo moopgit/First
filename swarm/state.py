@@ -7,12 +7,19 @@ status can never disagree with the record it summarizes.
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import dataclass, field
 
 # A task is always in exactly one status: pending, running, waiting, review, done, escalated or parked.
 TERMINAL = ("done", "parked")
 
 ENVELOPE = {"seq": int, "ts": str, "run": str, "task": (str, type(None)), "type": str, "actor": str, "data": dict}
+# Events the harness always writes with a task id. Without one they can't be attributed to anything.
+TASK_EVENTS = {
+    "task_created", "task_started", "turn", "tool", "submitted", "gate", "review_started", "review", "fix_cycle",
+    "waiting", "task_done", "escalated", "retry", "parked", "plan", "trace", "trace_skipped",
+    "decision_requested", "decided", "decision_refused", "action_executed",
+}
 # Data fields each event type needs, with the value used in their place when one is missing or mistyped.
 FIELDS: dict[str, dict[str, object]] = {
     "run_started": {"goal": "", "requested_by": "", "config_hash": ""},
@@ -40,7 +47,12 @@ def _fits(value: object, default: object) -> bool:
     if isinstance(default, bool):
         return isinstance(value, bool)
     if isinstance(default, float):
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except OverflowError:
+            return False
     return isinstance(value, type(default))
 
 
@@ -55,6 +67,8 @@ def check_event(raw: object) -> tuple[dict | None, list[str]]:
     bad = [k for k, kind in ENVELOPE.items() if k not in raw or not isinstance(raw[k], kind)]
     if bad:
         return None, [f"envelope field {', '.join(bad)} missing or mistyped"]
+    if raw["type"] in TASK_EVENTS and not raw["task"]:
+        return None, [f"{raw['type']} has no task id"]
     data, issues = dict(raw["data"]), []
     for key, default in FIELDS.get(raw["type"], {}).items():
         if key not in data:

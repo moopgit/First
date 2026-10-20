@@ -222,11 +222,11 @@ def _load_snapshot(run_dir: Path, config_hash: str, base_dir: str) -> Config | s
     for path in (run_dir / "config.yaml", run_dir / f"config.{config_hash[:16]}.yaml"):
         if not path.is_file():
             continue
-        text = path.read_text()
-        if hashlib.sha256(text.encode()).hexdigest() != config_hash:
-            continue
         try:
+            text = path.read_text()
+            if hashlib.sha256(text.encode()).hexdigest() != config_hash:
+                continue
             return parse_config(text, base_dir=Path(base_dir))
-        except ConfigError as e:
-            return f"snapshot for config {config_hash[:12]} doesn't parse: {e}"
-    return f"no snapshot of config {config_hash[:12] or '(none recorded)'} in .swarm/runs/{run_dir.name}/"
+        except (ConfigError, ValueError, OSError) as e:
+            return f"snapshot for config {config_hash[:12]} can't be read: {e}"
+    return f"no snapshot of config {config_hash[:12] or '(none recorded)'} in {run_dir}/"

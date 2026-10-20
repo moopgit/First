@@ -107,7 +107,7 @@ class Ledger:
             for n, raw in enumerate(f, 1):
                 try:
                     event = json.loads(raw)
-                except json.JSONDecodeError as e:
+                except (ValueError, RecursionError) as e:  # ValueError covers JSONDecodeError and parser limits
                     raise LedgerError(f"ledger line {n} is not valid JSON - run `swarm audit`") from e
                 if run is None or (isinstance(event, dict) and event.get("run") == run):
                     out.append(event)
@@ -126,7 +126,7 @@ class Ledger:
         for n, raw in enumerate(data.splitlines(), 1):
             try:
                 event = json.loads(raw)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 problems.append(f"line {n}: not valid JSON")
                 continue
             if not isinstance(event, dict):

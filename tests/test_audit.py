@@ -269,3 +269,51 @@ def test_each_window_is_checked_against_the_config_in_force(tmp_path):
     asyncio.run(o2.decide(view.inbox[0].id, granted=True, text="approved"))
     assert asyncio.run(o2.drive(rid)).status == "done"
     assert failing(o2.ledger, cfg2) == {}
+
+
+# --- found by adversarial verification of the fix pass ----------------------------------------
+
+
+@pytest.mark.parametrize("task_id", [None, ""])
+def test_task_events_without_a_task_id_are_findings_and_views_survive(tmp_path, capsys, task_id):
+    cfg, led = construct_honest(tmp_path)
+    for typ, extra in (("submitted", dict(n=1, summary="s", artifacts=[])), ("task_done", {}),
+                       ("decision_requested", dict(decision="D9", kind="action", summary="s"))):
+        led.append(typ, run="R1", task=task_id, actor="x", **extra)
+    problems = failing(led, cfg)["every event is structurally complete"]
+    assert sum("has no task id" in p for p in problems) == 3
+    for cmd in ("status", "inbox", "log"):
+        assert main(["-c", str(tmp_path / "swarm.yaml"), cmd]) == 0
+
+
+def test_unreadable_run_metadata_is_a_finding_not_a_crash(tmp_path):
+    cfg = make_cfg(tmp_path)
+    led = Ledger(cfg.state_dir)
+    rd = cfg.state_dir / "runs" / "R1"
+    rd.mkdir(parents=True)
+    (rd / "config.yaml").write_text(cfg.source_text)
+    led.append("run_started", run="R1", actor="Andy", goal="g", requested_by="Andy", config_hash=cfg.hash,
+               base_dir="/tmp/x\x00y")
+    honest(led)
+    led.append("turn", run="R1", task="T2", actor="research", cost=10**400)
+    problems = failing(led, cfg)
+    assert any("can't be read" in p for p in problems[CONSTRUCTIONS["L2 artifacts gate only"][1]])
+    assert any("cost has the wrong type" in p for p in problems["every event is structurally complete"])
+
+
+def test_lines_past_the_json_parser_limits_are_findings(tmp_path):
+    cfg, led = construct_honest(tmp_path)
+    with open(led.path, "a") as f:
+        f.write('{"seq": 7, "data": {"n": ' + "9" * 5000 + "}}\n")
+        f.write("[" * 100000 + "]" * 100000 + "\n")
+    (chain,) = audit(led, governor="Andy", max_fix_cycles=3)
+    assert sum("not valid JSON" in p for p in chain.problems) == 2
+    assert main(["-c", str(tmp_path / "swarm.yaml"), "audit"]) == 1
+    assert main(["-c", str(tmp_path / "swarm.yaml"), "status"]) == 1  # reported as a ledger error, not a traceback
+
+
+def test_missing_snapshot_finding_names_the_real_directory(tmp_path):
+    cfg, led = construct_honest(tmp_path)
+    (cfg.state_dir / "runs" / "R1" / "config.yaml").unlink()
+    problems = failing(led, cfg)[CONSTRUCTIONS["L2 artifacts gate only"][1]]
+    assert any(str(cfg.state_dir / "runs" / "R1") in p for p in problems)
