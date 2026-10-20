@@ -100,6 +100,13 @@ HEDGES = (
     "i think", "maybe", "probably", "perhaps", "should", "might", "could", "not sure", "unsure",
     "if you", "unless", "i guess", "kind of", "sort of", "wait", "hold", "later", "no", "not", "don't", "dont",
 )
+# Negative words inside these phrases add to an approval rather than qualify it ("Approved, no changes").
+# Anywhere else, a hedge still refuses: the harness runs the whole queued action, so a partial or
+# conditional yes ("approved, not the README") must come back as a question.
+BENIGN = re.compile(
+    r"(?<!\S)(?:no (?:further )?changes(?: needed)?|no (?:edits|notes|comments|concerns|objections|issues|questions|worries)"
+    r"|no problems?|not a problem|nothing (?:to add|to change|further))(?!\S)"
+)
 
 
 def approval_problem(text: str) -> str | None:
@@ -109,7 +116,7 @@ def approval_problem(text: str) -> str | None:
         return "approval text is empty"
     if "?" in (text or ""):
         return "that reads as a question, not an approval"
-    padded = f" {norm} "
+    padded = f" {BENIGN.sub(' ', norm)} "
     hedge = next((h for h in HEDGES if f" {h} " in padded), None)
     if hedge:
         return f"contains {hedge!r}, which makes it ambiguous"

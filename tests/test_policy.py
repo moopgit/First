@@ -7,7 +7,11 @@ import pytest
 from swarm import policy as pol
 
 
-@pytest.mark.parametrize("text", ["approved", "Approved.", "yes", "yes, go", "go ahead", "ship it", "LGTM", "do it"])
+@pytest.mark.parametrize("text", [
+    "approved", "Approved.", "yes", "yes, go", "go ahead", "ship it", "LGTM", "do it",
+    "Approved, no changes", "Yes, go, no changes", "approved - no notes", "No problem, ship it",
+    "go ahead, no further changes needed",
+])
 def test_explicit_approvals_pass(text):
     assert pol.approval_problem(text) is None
 
@@ -15,6 +19,7 @@ def test_explicit_approvals_pass(text):
 @pytest.mark.parametrize("text", [
     "should be in I think", "approved?", "maybe go", "not approved", "no", "I guess so", "yes but hold off",
     "", "looks interesting", "go, unless legal objects",
+    "approved, not the README", "no go", "Approved, no changes. Hold the Buzz part",
 ])
 def test_ambiguous_or_negative_replies_are_refused(text):
     assert pol.approval_problem(text) is not None
