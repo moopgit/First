@@ -498,6 +498,32 @@ def test_decisions_record_who_actually_ran_them(cfg, monkeypatch):
     assert events(o2, "decided")[-1]["actor"] == "alice@laptop"
 
 
+def test_the_recorded_user_is_the_process_owner_not_an_environment_claim(cfg, monkeypatch):
+    import pwd, os
+    monkeypatch.setenv("LOGNAME", "Andy")
+    monkeypatch.setenv("USER", "Andy")
+    who = invoker()
+    assert who["user"] == pwd.getpwuid(os.geteuid()).pw_name and who["uid"] == os.geteuid()
+    assert who["env_user"] == "Andy" or who["user"] == "Andy"
+
+
+def test_git_state_is_only_claimed_for_a_tracked_package(tmp_path):
+    import shutil, subprocess, sys
+    from pathlib import Path
+    import swarm
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text("vendored/\n")
+    (repo / "README").write_text("x")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], check=True)
+    shutil.copytree(Path(swarm.__file__).parent, repo / "vendored" / "swarm", ignore=shutil.ignore_patterns("__pycache__"))
+    out = subprocess.run([sys.executable, "-c", "from swarm.provenance import build; b = build(); print(b['git_head'], b['git_dirty'])"],
+                         cwd=repo / "vendored", capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["None", "None"], "an ignored copy must not claim the checkout's commit"
+
+
 def test_audit_flags_a_decision_with_no_record_of_who_ran_it(cfg):
     o = orch(cfg, team(plan(task("a", "writer")), worker=lambda m, msgs: write("outbound/x.md", "x")))
     rid, view = run(o)
