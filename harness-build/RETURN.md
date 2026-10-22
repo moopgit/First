@@ -1,17 +1,22 @@
 # Return: five-part agent harness
 
-**Status:** all five parts built and pushed. 93/93 tests green locally on
-Python 3.10–3.13, in a fresh clone from GitHub, and in the template's own
-GitHub Actions run (Python 3.10 and 3.13).
+**Status:** all five parts built and pushed, plus the owner's one decided
+change (only the owner answers approvals). 95/95 tests green locally on Python
+3.10–3.13, in a fresh clone from GitHub, and in the template's own GitHub
+Actions runs (Python 3.10 and 3.13).
 
 ## Repositories and HEAD commits
 
 | repo | visibility | HEAD (`main`) |
 |---|---|---|
-| [moopgit/harness-template](https://github.com/moopgit/harness-template) | private | [`121d98276ba781ff69f76d837f173b485d593758`](https://github.com/moopgit/harness-template/commit/121d98276ba781ff69f76d837f173b485d593758) |
+| [moopgit/harness-template](https://github.com/moopgit/harness-template) | private | [`0275535234dd8313d579bb930491c78b9a1df373`](https://github.com/moopgit/harness-template/commit/0275535234dd8313d579bb930491c78b9a1df373) |
 | [moopgit/harness-records-001](https://github.com/moopgit/harness-records-001) | private | [`1e34c32f8c071ee540c8ad0eb8bb69443e4374de`](https://github.com/moopgit/harness-records-001/commit/1e34c32f8c071ee540c8ad0eb8bb69443e4374de) |
 
-CI: [tests run #1](https://github.com/moopgit/harness-template/actions/runs/39867393106) on `121d982`: success.
+Template history: `121d982` the five-part build · `0275535` only the owner
+answers approvals (the owner's decision on question 2 below).
+
+CI: [run #1](https://github.com/moopgit/harness-template/actions/runs/39867393106) on `121d982` and
+[run #2](https://github.com/moopgit/harness-template/actions/runs/39868075107) on `0275535`: both success.
 
 ## Registry entries
 
@@ -26,7 +31,7 @@ CI: [tests run #1](https://github.com/moopgit/harness-template/actions/runs/3986
 
 ## Acceptance evidence, part by part
 
-Full suite: `python -m unittest -v` → **Ran 93 tests, OK** (0 failures, 0 skipped) on
+Full suite on `0275535`: `python -m unittest -v` → **Ran 95 tests, OK** (0 failures, 0 skipped) on
 Python 3.13, 3.12, 3.11 and 3.10; again in a fresh clone from GitHub; and in
 GitHub Actions (3.10, 3.13).
 
@@ -38,10 +43,11 @@ GitHub Actions (3.10, 3.13).
 commit, and its tree is `README.md` only; `verify-records` on a fresh GitHub
 clone → `RECORDS APPEND-ONLY: 1 commits checked`. Registry entries above.
 
-**T2. Suite green.** 93/93.
+**T2. Suite green. Pass.** 95/95.
 
-**T3. Replay test.** The made-up catch-to-settled story, run live, then replayed
-from the log file alone in a separate process:
+**T3. Replay test. Pass.** The made-up catch-to-settled story, run live, then
+replayed from the log file alone in a separate process (code from a fresh
+GitHub clone at `0275535`):
 
 ```
 seq  0  log.opened            by harness          [unauthenticated-by-design]
@@ -55,8 +61,8 @@ seq  7  finding.closed        by fixture-lead     verification_seq 6
 (each event's hash chains to the previous one's; all actors labeled unauthenticated-by-design)
 
 COMPARISON
-  live picture   sha256 871b9711b46bd2e6d545708828e76e8e2cc0e6ff8fcde3735419294faae31ce5  (1607 bytes, running Harness object)
-  replay picture sha256 871b9711b46bd2e6d545708828e76e8e2cc0e6ff8fcde3735419294faae31ce5  (1607 bytes, separate process, log file only)
+  live picture   sha256 7df0bcf9c14dda14dcce8c32cee03e8cc11b27f4b376037605fba7aaae25ed95  (1607 bytes, running Harness object)
+  replay picture sha256 7df0bcf9c14dda14dcce8c32cee03e8cc11b27f4b376037605fba7aaae25ed95  (1607 bytes, separate process, log file only)
   byte-for-byte identical: True
 
 NEGATIVE CONTROL: drop the closing event and replay  -> identical: False; finding status 'confirmed'
@@ -70,7 +76,7 @@ The test suite also replays a record that touches every part (findings,
 probes, approval with re-ask, plan denied then approved, a finished run)
 and gets a byte-identical picture.
 
-**T4. Clone test. Pass.** Fresh `git clone https://github.com/moopgit/harness-template.git` at `121d982`:
+**T4. Clone test. Pass.** Fresh `git clone https://github.com/moopgit/harness-template.git` at `0275535`:
 
 ```
 43 files on disk = 43 tracked:
@@ -83,9 +89,10 @@ and gets a byte-identical picture.
 instance state (*.jsonl *.ndjson *.log snapshot* runs/ records/ logs/ .env* config/): none
 serialised log lines in any file: 0
 commit-like hashes in any file: 0
-code identity (clone) == code identity (original) == 42d0af670a8d…ab55f
+code identity: harness reports 9ef2cf6dc61aa8f801a149d9100197a04504852298d26167dbd6661dfbc81f3c,
+               plain sha256sum recomputation gives the same
 trying to write a log inside the clone -> TemplateRunRefused (the template is never run from)
-test suite inside the fresh clone -> Ran 93 tests, OK
+test suite inside the fresh clone -> Ran 95 tests, OK
 ```
 
 The same checks run as tests (`test_template_clean.py`), so every future
@@ -103,11 +110,12 @@ stamped with `harness_tree_sha256`. One changed byte changes it, schemas are
 included, there is no version label, and it can be recomputed with plain
 `sha256sum`.
 
-### Part 2: approval surface (13 tests, all ok)
+### Part 2: approval surface (15 tests, all ok)
 - a tampered action is refused, and the function never runs
 - an action whose approved wording was altered is refused (and wording altered *in the log* fails audit)
 - a qualified approval runs nothing and produces a re-ask naming the condition ("approved, but only after the tests pass" → re-ask quotes "but only after the tests pass")
 - a refusal is present in the log afterwards (`refusal.recorded`, gate `approval`)
+- only the owner answers: a builder, reviewer or checker answering is refused and recorded, and nothing runs; a log where a non-owner answered fails audit even with every hash recomputed
 - also: one approval runs once; denial runs nothing; requester can't answer its own request; a log that records a denial as "approved" fails audit even with every hash recomputed
 
 ### Part 3: mechanical gates + plan gate (11 tests, all ok)
@@ -131,15 +139,22 @@ included, there is no version label, and it can be recomputed with plain
 ## What I built, one line per part
 
 1. **Log:** hash-chained append-only JSONL event log; picture always folded from it; findings story with two-party rules; UNPROVEN checker-accuracy types; code identity = hash of the package bytes.
-2. **Approvals:** action and wording bound by hash at request time; exact-word allow-list for approval; any condition → nothing runs + re-ask naming it; single use; refusals logged.
+2. **Approvals:** action and wording bound by hash at request time; owner-only answers; exact-word allow-list for approval; any condition → nothing runs + re-ask naming it; single use; refusals logged.
 3. **Gates:** secret / forbidden / file-rule checks recorded before review, review refused for stopped or unchecked bytes; plan gate with counted denials, third denial parks and escalates atomically.
 4. **Runs:** reserve-before-start caps per task, per line (builder/reviewer) and per run; three-strikes escalation plus attempt ceiling; resume from the log with in-doubt handling and credential checks.
 5. **Surfaces:** `status` and `replay` from the log; `audit` re-runs the writer's rulebook over the whole log, with optional head anchor, and prints its limit every time; `verify-records` for the records repo.
 
 ## Usage figure at close
 
-Not available to me: I can't see the usage display in your app. Please
-take that snapshot on your side.
+Taken by the owner from the Claude app's Usage screen at close (device clock
+6:48), since I can't see that display:
+
+| meter | used | resets |
+|---|---|---|
+| Current session | 23% | in 4 hr 21 min |
+| Weekly limit, all models | 3% | Tue 6:00 PM |
+
+Limit resets: none available. Usage credits: off.
 
 ---
 
@@ -155,7 +170,9 @@ the next. I built the five parts in order but ran the suite once all five
 existed, so there was no hard stop between parts. The first full run had 2
 failures, both in the tests, not the mechanisms: the README didn't exist yet,
 and one test tried to spend on a run that had already finished. Both fixed;
-everything else passed first time. The template history is one commit.
+everything else passed first time. The build is one commit (`121d982`). The
+owner-only approvals change is a second commit (`0275535`), made after the
+owner answered question 2.
 
 **Couldn't be built exactly as stated (built the nearest honest version):**
 1. *"Past events can't be changed without it showing."* A hash chain alone can't
@@ -190,19 +207,25 @@ everything else passed first time. The template history is one commit.
   "no problem, go ahead" isn't counted as a plan denial strike.
 - Added second-party rules the spec implies but doesn't state: the checker ≠
   the claimant; the approval requester ≠ the approver; a plan's author ≠ its
-  decider. All label-level.
+  decider. All label-level, as is the owner-only rule for approvals.
+- Owner-only applies to approvals, not plan decisions: the spec escalates a
+  plan's third denial *to* the owner, so the denier is a reviewer, not the owner.
 - The audit re-derives every stated outcome and count (an answer's reading,
   denial_count, failure_count, finished steps), so a log that says "approved"
   for a denial fails audit even with valid hashes.
 - Escalation is a log event shown in `status`. Nothing notifies you, and there's
-  no un-park / restart flow yet.
+  no un-park / restart flow in this build (see owner decision 3).
 - Nothing here calls a model: steps are Python functions an instance supplies.
 - The template refuses to write logs inside itself (`.harness-template`
   marker), which makes rule 10 mechanical. An instance deletes the marker.
 
-**Questions:**
-1. Do you want the allow-list to include `ok`/`lgtm`? I'd say no.
-2. Who may answer approvals: anyone but the requester (as built), or only the
-   `owner` role?
-3. Should an owner be able to un-park a plan or restart an escalated run, and
-   should that be part of a later fix order?
+**Questions, answered by the owner:**
+1. *Should `ok`/`lgtm` count as approval?* **No.** The exact-word rule stands as
+   built (`approve`, `approved`, `yes`). No change.
+2. *Who may answer approvals?* **The owner only, for now.** Built in `0275535`:
+   answers from any other role are refused, recorded, and fail audit. Tiered
+   approvals are a possible later refinement, not part of this build.
+3. *Can a parked plan or escalated run be restarted?* **Yes, by the owner only,
+   and only as a new event in the log (a restart decision), never as an edit
+   to the parked or escalated record.** This is a later fix order, not a change
+   to this build; nothing for it is built here.
