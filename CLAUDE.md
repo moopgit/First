@@ -17,7 +17,8 @@ As of initial setup, only this `CLAUDE.md` exists. Update this section as the pr
 
 ```
 First/
-└── CLAUDE.md          # This file — AI assistant guidance
+├── CLAUDE.md          # This file — AI assistant guidance
+└── harness-build/     # Staging for the harness-template / harness-records-001 repos (bundles + return package)
 ```
 
 ---
